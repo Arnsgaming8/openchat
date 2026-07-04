@@ -303,31 +303,23 @@
     <div class="setting-group">
       <label>Web search</label>
       <select id="searchProvider">
-        <option value="ddg">DuckDuckGo (real-time, via proxy)</option>
-        <option value="google">Google Search (via proxy)</option>
-        <option value="brave">Brave Search (free API key)</option>
-        <option value="searxng">SearXNG (self-hosted)</option>
+        <option value="ddg">DuckDuckGo (instant answers, no setup)</option>
+        <option value="brave">Brave Search (free API key, full results)</option>
+        <option value="searxng">SearXNG (self-hosted, full results)</option>
       </select>
+      <div class="hint" id="ddgHint" style="margin-top:6px;color:var(--text-secondary);font-size:11px">
+        DuckDuckGo works immediately with no setup. For full web results, get a free <a href="https://api.search.brave.com" target="_blank" rel="noopener">Brave API key</a>.
+      </div>
     </div>
     <div class="setting-group" id="braveKeyGroup" style="display:none">
       <label>Brave Search API key</label>
-      <input type="password" id="braveKey" placeholder="Get free key at api.search.brave.com">
-      <div class="hint">Free tier: 2,000 queries/month. No credit card needed.</div>
+      <input type="password" id="braveKey" placeholder="Paste your free API key">
+      <div class="hint">Free tier: 2,000 queries/month. Get one at <a href="https://api.search.brave.com" target="_blank" rel="noopener">api.search.brave.com</a></div>
     </div>
     <div class="setting-group" id="searxngGroup" style="display:none">
       <label>SearXNG instance URL</label>
       <input type="url" id="searxngUrl" value="https://searx.be" placeholder="https://searx.be">
       <div class="hint">Use any public SearXNG instance or your own.</div>
-    </div>
-    <div class="setting-group" id="corsGroup">
-      <label>CORS proxy (for DuckDuckGo/Google)</label>
-      <select id="corsProxy">
-        <option value="https://api.allorigins.win/raw?url=">api.allorigins.win</option>
-        <option value="https://corsproxy.io/?url=">corsproxy.io</option>
-        <option value="https://corsproxy.org/?url=">corsproxy.org</option>
-        <option value="custom">Custom proxy</option>
-      </select>
-      <input type="url" id="corsProxyCustom" style="display:none;margin-top:6px" placeholder="https://your-proxy.com/?url=">
     </div>
     <div class="setting-group">
       <label>Voice output</label>
@@ -385,18 +377,14 @@ const recordingIndicator = $('recordingIndicator');
 const voiceBtn = $('voiceBtn');
 const braveKeyGroup = $('braveKeyGroup');
 const searxngGroup = $('searxngGroup');
-const corsGroup = $('corsGroup');
 
 function updateSearchSettings() {
   const v = $('searchProvider').value;
   braveKeyGroup.style.display = v === 'brave' ? 'block' : 'none';
   searxngGroup.style.display = v === 'searxng' ? 'block' : 'none';
-  corsGroup.style.display = (v === 'ddg' || v === 'google') ? 'block' : 'none';
+  $('ddgHint').style.display = v === 'ddg' ? 'block' : 'none';
 }
 $('searchProvider').addEventListener('change', updateSearchSettings);
-$('corsProxy').addEventListener('change', () => {
-  $('corsProxyCustom').style.display = $('corsProxy').value === 'custom' ? 'block' : 'none';
-});
 updateSearchSettings();
 
 // ===== SIDEBAR =====
@@ -640,24 +628,41 @@ async function genImage(prompt) {
   if (!prompt) input.value = '';
   appendMessage('user', `Generate: ${p}`);
   const msgIdx = getCurrentChat().messages.length;
-  getCurrentChat().messages.push({ role: 'image-gen', imageUrl: '', imageLoading: true });
-  renderMessages();
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=1024&height=1024&nologo=true`;
-  // Preload
-  const img = new Image();
-  img.onload = () => {
-    const msg = getCurrentChat().messages[msgIdx];
-    if (msg) { msg.imageUrl = url; msg.imageLoading = false; renderMessages(); }
-  };
-  img.onerror = () => {
-    const msg = getCurrentChat().messages[msgIdx];
-    if (msg) { msg.content = 'Image generation failed. Try again.'; msg.imageLoading = false; renderMessages(); }
-  };
-  img.src = url;
-  // Show immediately, will update when loaded
-  const msg = getCurrentChat().messages[msgIdx];
-  if (msg) msg.imageUrl = url;
+  // Use alt URL format as fallback if primary fails
+  const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}`;
+  getCurrentChat().messages.push({ role: 'image-gen', imageUrl: url, imageLoading: true, genFailed: false });
   renderMessages();
+  // Attach load/error handler to the img element after DOM renders
+  setTimeout(() => {
+    const msgs = messages.querySelectorAll('.msg');
+    const lastImg = msgs[msgs.length - 1]?.querySelector('img.gen-img');
+    if (lastImg) {
+      lastImg.onload = () => {
+        const msg = getCurrentChat().messages[msgIdx];
+        if (msg) { msg.imageLoading = false; renderMessages(); saveToDisk(); }
+      };
+      lastImg.onerror = () => {
+        const msg = getCurrentChat().messages[msgIdx];
+        if (msg && !msg.genFailed) {
+          msg.genFailed = true;
+          msg.imageUrl = fallbackUrl;
+          renderMessages();
+          // Attach handler again after re-render
+          setTimeout(() => {
+            const msgs2 = messages.querySelectorAll('.msg');
+            const img2 = msgs2[msgs2.length - 1]?.querySelector('img.gen-img');
+            if (img2) {
+              img2.onload = () => { msg.imageLoading = false; renderMessages(); saveToDisk(); };
+              img2.onerror = () => { msg.imageLoading = false; msg.content = 'Image generation failed. Try again.'; renderMessages(); saveToDisk(); };
+            }
+          }, 50);
+        } else if (msg) {
+          msg.imageLoading = false; msg.content = 'Image generation failed. Try again.'; renderMessages(); saveToDisk();
+        }
+      };
+    }
+  }, 50);
   saveToDisk();
 }
 function saveImage(url) {
@@ -666,17 +671,9 @@ function saveImage(url) {
 }
 
 // ===== WEB SEARCH (real-time) =====
-function getCorsUrl(url) {
-  const sel = $('corsProxy').value;
-  if (sel === 'custom') return $('corsProxyCustom').value.trim() + encodeURIComponent(url);
-  return sel + encodeURIComponent(url);
-}
-
 async function webSearch(query) {
   const provider = $('searchProvider').value;
   switch (provider) {
-    case 'ddg': return await duckDuckGoSearch(query);
-    case 'google': return await googleSearch(query);
     case 'brave': return await braveSearch(query);
     case 'searxng': return await searxngSearch(query);
     default: return await duckDuckGoSearch(query);
@@ -684,84 +681,28 @@ async function webSearch(query) {
 }
 
 async function duckDuckGoSearch(query) {
-  const results = [];
   try {
-    // Try real HTML search via CORS proxy first (real-time results)
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const resp = await fetch(getCorsUrl(url), {
-      signal: AbortSignal.timeout(10000),
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+    const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`, {
+      signal: AbortSignal.timeout(8000)
     });
-    const html = await resp.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const items = doc.querySelectorAll('.result');
-    items.forEach(el => {
-      const titleEl = el.querySelector('.result__title a');
-      const snippetEl = el.querySelector('.result__snippet');
-      if (titleEl) {
-        results.push({
-          title: titleEl.textContent.trim(),
-          url: titleEl.getAttribute('href') || '',
-          snippet: snippetEl ? snippetEl.textContent.trim() : ''
-        });
-      }
-    });
-    if (results.length > 0) return results.slice(0, 8);
-  } catch (e) {
-    // Fallback to instant answer API if CORS proxy fails
-  }
-  try {
-    const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`);
     const data = await resp.json();
-    if (data.AbstractText) results.push({ title: data.Heading || 'Summary', url: data.AbstractURL || '', snippet: data.AbstractText });
-    if (data.RelatedTopics) {
-      data.RelatedTopics.forEach(t => {
-        if (t.Text) results.push({ title: t.Text.split(' - ')[0], url: t.FirstURL || '', snippet: t.Text });
-        if (t.Topics) t.Topics.forEach(st => { if (st.Text) results.push({ title: st.Text.split(' - ')[0], url: st.FirstURL || '', snippet: st.Text }); });
+    const results = [];
+    if (data.AbstractText) results.push({ title: data.Heading || 'About', url: data.AbstractURL || '', snippet: data.AbstractText });
+    if (data.Infobox?.content) {
+      data.Infobox.content.forEach(c => {
+        if (c.text && c.label) results.push({ title: c.label, url: '', snippet: c.text });
       });
     }
-    return results.slice(0, 8);
+    if (data.RelatedTopics) {
+      data.RelatedTopics.forEach(t => {
+        if (t.Text) results.push({ title: t.Text.split(' - ')[0] || t.Text, url: t.FirstURL || '', snippet: t.Text });
+        if (t.Topics) t.Topics.forEach(st => { if (st.Text) results.push({ title: st.Text.split(' - ')[0] || st.Text, url: st.FirstURL || '', snippet: st.Text }); });
+      });
+    }
+    if (results.length === 0) results.push({ title: 'No instant results', url: '', snippet: 'DuckDuckGo found no instant answer. For full web results, use the Brave Search option with a free API key.' });
+    return results.slice(0, 10);
   } catch (e) {
-    return [{ title: 'Search error', url: '', snippet: e.message }];
-  }
-}
-
-async function googleSearch(query) {
-  try {
-    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en`;
-    const resp = await fetch(getCorsUrl(url), {
-      signal: AbortSignal.timeout(10000),
-      headers: { 'User-Agent': 'Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15' }
-    });
-    const html = await resp.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const results = [];
-    // Google search result divs
-    const items = doc.querySelectorAll('div.g, div[data-hveid]');
-    items.forEach(el => {
-      const a = el.querySelector('a[href^="http"]');
-      const snippetEl = el.querySelector('.VwiC3b, [data-sncf], span.aCOpRe');
-      if (a && !a.href.includes('google.com')) {
-        results.push({
-          title: a.textContent.trim(),
-          url: a.href,
-          snippet: snippetEl ? snippetEl.textContent.trim() : ''
-        });
-      }
-    });
-    if (results.length > 0) return results.slice(0, 8);
-    // Fallback: try simple link extraction
-    const links = doc.querySelectorAll('a[href^="http"]');
-    links.forEach(a => {
-      if (!a.href.includes('google.com') && a.textContent.trim().length > 10) {
-        results.push({ title: a.textContent.trim(), url: a.href, snippet: '' });
-      }
-    });
-    return results.slice(0, 8);
-  } catch (e) {
-    return [{ title: 'Google search unavailable', url: '', snippet: 'CORS proxy may be blocked. Try DuckDuckGo or set up Brave key.' }];
+    return [{ title: 'Search error', url: '', snippet: e.message + '. Try again or use Brave Search with a free API key.' }];
   }
 }
 
