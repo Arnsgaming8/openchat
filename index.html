@@ -1079,15 +1079,25 @@ function loadFromDisk() {
 // ===== INIT =====
 loadFromDisk();
 autoResize(input);
-// Wait before auto-init to avoid racing with user's first message
-let autoInitTimer = setTimeout(async () => {
-  if (getCurrentChat().messages.length === 0 && !state.loadingModel && !state.modelLoaded) {
+
+// Model auto-init: always runs on startup, never cancelled
+(async function autoInit() {
+  // Small delay to let UI paint first
+  await new Promise(r => setTimeout(r, 800));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (state.modelLoaded) return;
     const ok = await initEngine();
-    if (ok) console.log('Model loaded on startup');
+    if (ok) { console.log('Model ready on startup'); return; }
+    if (attempt < 3) {
+      setStatus('loading', `Retrying (${attempt}/3)...`);
+      await new Promise(r => setTimeout(r, 2000));
+    }
   }
-}, 1500);
-// Cancel auto-init if user starts typing/sending quickly
-document.addEventListener('keydown', () => { if (autoInitTimer) { clearTimeout(autoInitTimer); autoInitTimer = null; } }, { once: true });
+  console.log('Auto-init failed after 3 attempts. Model will load on first message.');
+})();
+
+
+
 console.log('%c OpenChat ', 'background:#10a37f;color:white;font-size:16px;padding:4px 8px;border-radius:4px;font-weight:bold;');
 console.log('Free AI assistant: chat, search, voice, images, files, code.');
 </script>
