@@ -973,7 +973,9 @@ async function sendMessage() {
       const delta = chunk.choices?.[0]?.delta?.content || '';
       if (delta) { full += delta; updateLastMessage(full); }
     }
-    renderMessages();
+    streamingMsgEl = null;
+    streamingMsgIdx = -1;
+    renderMessages(); // Final render to ensure consistency
   } catch (err) {
     if (err.name !== 'AbortError') {
       removeTypingIndicator();
@@ -1002,11 +1004,31 @@ function appendMessage(role, content, extra) {
   renderMessages();
   updateCurrentChatTitle();
   saveToDisk();
+  // If this is the streaming assistant message, grab its DOM ref
+  if (role === 'assistant') {
+    const allMsgs = messages.querySelectorAll('.msg');
+    streamingMsgEl = allMsgs[allMsgs.length - 1];
+    streamingMsgIdx = chat.messages.length - 1;
+  }
 }
+
+let streamingMsgEl = null;
+let streamingMsgIdx = -1;
 
 function updateLastMessage(content) {
   const chat = getCurrentChat();
-  if (chat.messages.length > 0) { chat.messages[chat.messages.length - 1].content = content; renderMessages(); }
+  if (chat.messages.length > 0) {
+    const idx = chat.messages.length - 1;
+    chat.messages[idx].content = content;
+    // Direct DOM update — no full re-render to avoid flicker
+    if (streamingMsgEl && streamingMsgIdx === idx && document.contains(streamingMsgEl)) {
+      const td = streamingMsgEl.querySelector('.text');
+      if (td) td.innerHTML = renderMarkdown(content);
+      scrollToBottom();
+    } else {
+      renderMessages();
+    }
+  }
 }
 
 function showTypingIndicator() {
