@@ -182,8 +182,8 @@
   .error-msg { background: rgba(244,67,54,.1); border: 1px solid rgba(244,67,54,.3); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f44336; margin: 8px 0; }
 
   /* Generated image */
-  .gen-img { max-width: 100%; border-radius: 8px; margin: 8px 0; cursor: pointer; transition: opacity .3s; }
-  .gen-img.loading { opacity: .5; }
+  .gen-img { max-width: 100%; border-radius: 8px; margin: 8px 0; cursor: pointer; transition: opacity .5s; background: var(--surface); min-height: 100px; }
+  .gen-img.loading { opacity: .4; filter: blur(2px); }
   .img-actions { display: flex; gap: 6px; margin-top: 6px; }
   .img-actions button { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: background .15s; }
   .img-actions button:hover { background: var(--hover); }
@@ -700,47 +700,33 @@ function clearFile() { state.fileData = null; state.fileName = ''; fileBadge.cla
 
 // ===== IMAGE GENERATION (Pollinations.ai - free, no key) =====
 async function genImage(prompt) {
-  const text = prompt || input.value.trim();
-  if (!text) { input.focus(); return; }
-  const p = prompt || text;
+  const p = prompt || input.value.trim();
+  if (!p) { input.focus(); return; }
   if (!prompt) input.value = '';
   appendMessage('user', `Generate: ${p}`);
-  const msgIdx = getCurrentChat().messages.length;
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=1024&height=1024&nologo=true`;
-  // Use alt URL format as fallback if primary fails
-  const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}`;
-  getCurrentChat().messages.push({ role: 'image-gen', imageUrl: url, imageLoading: true, genFailed: false });
+  getCurrentChat().messages.push({ role: 'image-gen', imageUrl: url, imageLoading: true });
   renderMessages();
-  // Attach load/error handler to the img element after DOM renders
-  setTimeout(() => {
+  // After render, find the img and let it load naturally - on load remove loading class via mutation
+  const checkImg = setInterval(() => {
     const msgs = messages.querySelectorAll('.msg');
-    const lastImg = msgs[msgs.length - 1]?.querySelector('img.gen-img');
-    if (lastImg) {
-      lastImg.onload = () => {
-        const msg = getCurrentChat().messages[msgIdx];
-        if (msg) { msg.imageLoading = false; renderMessages(); saveToDisk(); }
-      };
-      lastImg.onerror = () => {
-        const msg = getCurrentChat().messages[msgIdx];
-        if (msg && !msg.genFailed) {
-          msg.genFailed = true;
-          msg.imageUrl = fallbackUrl;
-          renderMessages();
-          // Attach handler again after re-render
-          setTimeout(() => {
-            const msgs2 = messages.querySelectorAll('.msg');
-            const img2 = msgs2[msgs2.length - 1]?.querySelector('img.gen-img');
-            if (img2) {
-              img2.onload = () => { msg.imageLoading = false; renderMessages(); saveToDisk(); };
-              img2.onerror = () => { msg.imageLoading = false; msg.content = 'Image generation failed. Try again.'; renderMessages(); saveToDisk(); };
-            }
-          }, 50);
-        } else if (msg) {
-          msg.imageLoading = false; msg.content = 'Image generation failed. Try again.'; renderMessages(); saveToDisk();
-        }
+    const img = msgs[msgs.length - 1]?.querySelector('img.gen-img');
+    if (img) {
+      clearInterval(checkImg);
+      img.onload = () => { img.classList.remove('loading'); };
+      img.onerror = () => {
+        // Retry without params
+        img.src = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}`;
+        img.onerror = () => { img.style.display = 'none'; img.parentElement.innerHTML = '<p style="color:#f44336;font-size:13px">Image generation failed. Try again.</p>'; };
       };
     }
-  }, 50);
+  }, 100);
+  // Fallback: remove loading class after 30s regardless
+  setTimeout(() => {
+    const msgs = messages.querySelectorAll('.msg');
+    const img = msgs[msgs.length - 1]?.querySelector('img.gen-img');
+    if (img) img.classList.remove('loading');
+  }, 30000);
   saveToDisk();
 }
 function saveImage(url) {
