@@ -795,7 +795,7 @@ async function _initEngine() {
     const m = modelSelect.value;
     state.selectedModel = m;
     setStatus('loading', `Loading WebLLM runtime...`);
-    const mlc = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.77/+esm');
+    const mlc = await import('https://esm.run/@mlc-ai/web-llm@0.2.84');
     setStatus('loading', `Downloading ${getModelLabel(m)}... (first load: 1-4GB)`);
     const engine = await mlc.CreateMLCEngine(m, {
       initProgressCallback: (p) => { setStatus('loading', `Loading... ${Math.round((p.progress||0)*100)}%`); },
