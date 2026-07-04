@@ -16,10 +16,52 @@
   html, body { height: 100%; overflow: hidden; font-family: var(--font); background: var(--bg); color: var(--text); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .app { display: flex; height: 100%; }
+  .app { display: flex; height: 100%; width: 100%; }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* --- Loading Screen --- */
+  .loading-screen {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999;
+    background: var(--bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 24px;
+    transition: opacity .6s ease, visibility .6s ease;
+  }
+  .loading-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .loading-logo { font-size: 56px; animation: pulse-logo 2s ease-in-out infinite; }
+  @keyframes pulse-logo { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+  .loading-title { font-size: 24px; font-weight: 700; color: var(--text); }
+  .loading-subtitle { font-size: 13px; color: var(--text-secondary); margin-top: -16px; }
+  .loading-bar-wrap {
+    width: 300px; max-width: 80vw; height: 6px; background: var(--surface);
+    border-radius: 3px; overflow: hidden; position: relative;
+  }
+  .loading-bar {
+    height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #4ade80);
+    border-radius: 3px; transition: width .3s ease;
+  }
+  .loading-bar.indeterminate {
+    width: 30%; animation: indeterminate 1.5s ease-in-out infinite;
+  }
+  @keyframes indeterminate {
+    0%{transform:translateX(-100%)} 100%{transform:translateX(400%)}
+  }
+  .loading-pct { font-size: 28px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .loading-status { font-size: 13px; color: var(--text-secondary); text-align: center; max-width: 320px; line-height: 1.5; }
+  .loading-error { color: #f44336; font-size: 13px; text-align: center; max-width: 320px; line-height: 1.5; }
+  .loading-retry {
+    margin-top: 8px; padding: 8px 24px; border-radius: 8px; background: var(--accent);
+    color: white; border: none; cursor: pointer; font-size: 14px; transition: background .2s;
+  }
+  .loading-retry:hover { background: var(--accent-hover); }
+  .loading-continue {
+    background: none; border: 1px solid var(--border); color: var(--text-secondary);
+    padding: 8px 24px; border-radius: 8px; cursor: pointer; font-size: 13px; margin-top: 4px;
+    transition: background .15s;
+  }
+  .loading-continue:hover { background: var(--surface); }
+  .app-wrap { display: flex; height: 100%; width: 100%; }
 
   /* --- Sidebar --- */
   .sidebar { width: 260px; min-width: 260px; background: var(--sidebar); display: flex; flex-direction: column; border-right: 1px solid var(--border); }
@@ -179,7 +221,22 @@
 </style>
 </head>
 <body>
-<div class="app">
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-logo">&#x1f916;</div>
+  <div class="loading-title">OpenChat</div>
+  <div class="loading-subtitle">Loading AI model to your device...</div>
+  <div class="loading-bar-wrap">
+    <div class="loading-bar indeterminate" id="loadingBar"></div>
+  </div>
+  <div class="loading-pct" id="loadingPct">--</div>
+  <div class="loading-status" id="loadingStatus">Initializing WebGPU...</div>
+  <div id="loadingError" style="display:none"></div>
+  <div id="loadingActions" style="display:none">
+    <button class="loading-retry" onclick="retryLoad()">Retry</button>
+    <button class="loading-continue" onclick="skipLoad()">Continue anyway</button>
+  </div>
+</div>
+<div class="app" id="app">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
@@ -763,6 +820,59 @@ async function runCode(lang, btn) {
   btn.disabled = false;
 }
 
+// ===== LOADING SCREEN =====
+const loadingScreen = $('loadingScreen');
+const loadingBar = $('loadingBar');
+const loadingPct = $('loadingPct');
+const loadingStatus = $('loadingStatus');
+const loadingError = $('loadingError');
+const loadingActions = $('loadingActions');
+
+let loadingStartTime = 0;
+
+function updateLoading(pct, status) {
+  const p = Math.round(Math.max(0, Math.min(100, pct)));
+  loadingBar.classList.remove('indeterminate');
+  loadingBar.style.width = p + '%';
+  loadingPct.textContent = p > 0 ? p + '%' : '--';
+  if (status) loadingStatus.textContent = status;
+}
+
+function doneLoading(success) {
+  if (success) {
+    loadingScreen.classList.add('hidden');
+    loadingBar.style.width = '100%';
+    loadingPct.textContent = '100%';
+    loadingStatus.textContent = 'Model ready!';
+  }
+}
+
+function showLoadingError(msg) {
+  loadingError.style.display = 'block';
+  loadingError.className = 'loading-error';
+  loadingError.textContent = msg;
+  loadingActions.style.display = 'block';
+}
+
+function showSkipOption() {
+  loadingActions.style.display = 'block';
+}
+
+function retryLoad() {
+  loadingError.style.display = 'none';
+  loadingActions.style.display = 'none';
+  loadingBar.classList.add('indeterminate');
+  loadingBar.style.width = '';
+  loadingPct.textContent = '--';
+  loadingStatus.textContent = 'Retrying...';
+  startModelLoad();
+}
+
+function skipLoad() {
+  loadingScreen.classList.add('hidden');
+  appendMessage('system', 'Model not loaded. You can try loading it from the sidebar, or send a message to start loading.');
+}
+
 // ===== WEBLLM ENGINE =====
 async function initEngine(force) {
   if (state.loadingModel) {
@@ -784,31 +894,41 @@ async function _initEngine() {
   try {
     if (!navigator.gpu) {
       setStatus('error', 'WebGPU not supported. Use Chrome 113+ or Safari 16.4+.');
-      appendMessage('system', 'WebGPU is required. Use Chrome 113+, Edge 113+, or Safari 16.4+ on iPad.');
+      showLoadingError('WebGPU not supported. Use Chrome 113+, Edge 113+, or Safari 16.4+ on iPad.');
       return false;
     }
-    // Dispose old engine if exists
     if (state.engine) {
       try { state.engine?.dispose?.(); } catch(e) {}
       state.engine = null;
     }
     const m = modelSelect.value;
     state.selectedModel = m;
-    setStatus('loading', `Loading WebLLM runtime...`);
+    updateLoading(0, 'Loading WebLLM runtime...');
+    setStatus('loading', 'Loading WebLLM runtime...');
     const mlc = await import('https://esm.run/@mlc-ai/web-llm@0.2.80');
-    setStatus('loading', `Downloading ${getModelLabel(m)}... (first load: 1-4GB)`);
+    updateLoading(5, `Downloading ${getModelLabel(m)}... (first load: 1-4GB)`);
+    setStatus('loading', `Downloading ${getModelLabel(m)}...`);
+    let lastPct = 0;
     const engine = await mlc.CreateMLCEngine(m, {
-      initProgressCallback: (p) => { setStatus('loading', `Loading... ${Math.round((p.progress||0)*100)}%`); },
+      initProgressCallback: (p) => {
+        const pct = (p.progress || 0) * 100;
+        if (pct > lastPct) { lastPct = pct; }
+        const display = Math.max(5, Math.round(pct));
+        updateLoading(display, p.text || `Loading... ${display}%`);
+        setStatus('loading', `Loading... ${display}%`);
+      },
     });
     state.engine = engine;
     state.modelLoaded = true;
+    updateLoading(100, `${getModelLabel(m)} ready`);
     setStatus('ready', `${getModelLabel(m)} ready`);
+    setTimeout(() => doneLoading(true), 400);
     return true;
   } catch (err) {
     state.modelLoaded = false;
     state.engine = null;
     setStatus('error', `Failed: ${err.message}`);
-    appendMessage('system', `Model load failed: ${err.message}. Try Qwen 1.5B (the smallest model) from the sidebar.`);
+    showLoadingError(`Failed: ${err.message}. Try Qwen 1.5B from the sidebar.`);
     return false;
   }
 }
@@ -1021,21 +1141,23 @@ function loadFromDisk() {
 loadFromDisk();
 autoResize(input);
 
-// Model auto-init: always runs on startup, never cancelled
-(async function autoInit() {
-  // Small delay to let UI paint first
-  await new Promise(r => setTimeout(r, 800));
+// Start model loading immediately (loading screen is already showing)
+async function startModelLoad() {
   for (let attempt = 1; attempt <= 3; attempt++) {
-    if (state.modelLoaded) return;
+    if (state.modelLoaded) return true;
+    updateLoading(0, `Loading model (attempt ${attempt}/3)...`);
     const ok = await initEngine();
-    if (ok) { console.log('Model ready on startup'); return; }
+    if (ok) { console.log('Model ready on startup'); return true; }
     if (attempt < 3) {
-      setStatus('loading', `Retrying (${attempt}/3)...`);
+      updateLoading(0, `Retrying (${attempt}/3)...`);
       await new Promise(r => setTimeout(r, 2000));
     }
   }
-  console.log('Auto-init failed after 3 attempts. Model will load on first message.');
-})();
+  showLoadingError('Model failed to load after 3 attempts. Try selecting Qwen 1.5B from the sidebar.');
+  return false;
+}
+// Small delay for DOM paint, then start
+setTimeout(startModelLoad, 300);
 
 
 
